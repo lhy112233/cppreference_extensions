@@ -14,10 +14,10 @@ auto main() -> int {
   }
 
   // Defuced construction
-  // {
-  //   hy::scope_exit exit([] { std::println("Scope exited with deduced type!");
-  //   });
-  // }
+  {
+    hy::scope_exit exit([] { std::println("Scope exited with deduced type!");
+    });
+  }
 
   {
     hy::scope_exit<std::function<void()>> exit(

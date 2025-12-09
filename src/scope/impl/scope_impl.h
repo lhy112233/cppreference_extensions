@@ -9,19 +9,40 @@
 #include <utility>
 
 namespace hy::impl {
-namespace {
 
+/**************************************/
+// class scope_exit_impl
+/**************************************/
+namespace {
+// Type requirements
+//  -EF shall be either:
+//  a Destructible FunctionObject type, --1-1
+//  an lvalue reference to FunctionObject,  --1-2
+//  an lvalue reference to function.  --1-3
+//  -Calling an lvalue of std::remove_reference_t<EF> with no argument shall be
+//  well-formed.  --2
 template <typename ScopeExitEF>
 concept scope_exit_ef_concept =
+    // 1
     requires(std::remove_reference_t<ScopeExitEF> ef) {
       { std::invoke(ef) };
-    };
+    } &&
+    (
+        // 1-1
+        (std::is_object_v<ScopeExitEF> &&
+         std::is_destructible_v<ScopeExitEF>) ||
+        // 1-2
+        (std::is_lvalue_reference_v<ScopeExitEF> &&
+         std::is_object_v<std::remove_reference_t<ScopeExitEF>> &&
+         std::is_destructible_v<std::remove_reference_t<ScopeExitEF>>) ||
+        // 1-3
+        (std::is_function_v<ScopeExitEF> &&
+         std::is_lvalue_reference_v<ScopeExitEF>));
 
 template <typename EF, typename Fn, typename Self>
 concept scope_exit_construct_overload_concept =
     !std::is_same_v<std::remove_cvref_t<Fn>, Self> &&
-    std::is_constructible_v<EF, Fn> &&
-    !std::is_same_v<std::remove_cvref<Self>, std::remove_cvref<Fn>>;
+    std::is_constructible_v<EF, Fn>;
 
 } // namespace
 
@@ -38,7 +59,8 @@ public:
     requires scope_exit_construct_overload_concept<EF, Fn, scope_exit_impl>
   explicit scope_exit_impl(Fn &&fn) noexcept(
       std::is_nothrow_constructible_v<EF, Fn> ||
-      std::is_nothrow_constructible_v<EF, Fn &>) {
+      std::is_nothrow_constructible_v<EF, Fn &>)
+      : dismissed_(false) {
     if constexpr ((!std::is_lvalue_reference_v<EF>) &&
                   std::is_nothrow_constructible_v<EF, Fn>) {
       ::new (storage_) EF(std::forward<Fn>(fn));
@@ -57,7 +79,9 @@ public:
       std::is_nothrow_copy_constructible_v<EF>)
     requires(std::is_nothrow_move_constructible_v<EF> ||
              std::is_copy_constructible_v<EF>)
-  {
+
+      : dismissed_(other.dismissed_) {
+
     static_assert(!std::is_nothrow_move_constructible_v<EF> ||
                       std::is_move_constructible_v<EF>,
                   "This is Undefined Behavior!");
@@ -66,6 +90,7 @@ public:
                   "This is Undefined Behavior!");
 
     auto &other_ef = *reinterpret_cast<exitfun *>(other.storage_);
+
     if constexpr (std::is_nothrow_move_constructible_v<EF>) {
       ::new (storage_) EF(std::forward<EF>(other_ef));
     } else {
@@ -101,26 +126,41 @@ public:
 private:
   alignas(alignof(EF)) std::byte storage_[sizeof(EF)];
   bool dismissed_;
-};
+}; // class scope_exit_impl
 
-/**
- * @brief scope_fail_impl
- *
- */
+/**************************************/
+// class scope_fail_impl
+/**************************************/
 namespace {
 template <typename EF>
 concept scope_fail_ef_concept = scope_exit_ef_concept<EF>;
-}
 
+template <typename EF, typename Fn, typename Self>
+concept scope_fail_construct_overload_concept =
+    !std::is_same_v<std::remove_cvref_t<Fn>, Self> &&
+    std::is_constructible_v<EF, Fn>;
+
+template <typename EF>
+concept scope_fail_move_construct_overload_concept =
+    std::is_nothrow_move_constructible_v<EF> ||
+    std::is_copy_constructible_v<EF>;
+} // namespace
+
+/**
+ * @brief This is the implementation of scope_fail
+ *
+ * @tparam EF
+ */
 template <scope_fail_ef_concept EF> class scope_fail_impl {
 public:
   template <typename Fn>
-    requires(!std::is_same_v<std::remove_cvref_t<Fn>, scope_fail_impl<EF>> &&
-             std::is_constructible_v<EF, Fn>)
+    requires scope_fail_construct_overload_concept<EF, Fn, scope_fail_impl<EF>>
   explicit scope_fail_impl(Fn &&fn) noexcept(
       std::is_nothrow_constructible_v<EF, Fn> ||
       std::is_nothrow_constructible_v<EF, Fn &>)
+
       : dismissed_(false), exception_count_(std::uncaught_exceptions()) {
+
     if constexpr (!std::is_lvalue_reference_v<Fn> &&
                   std::is_nothrow_constructible_v<EF, Fn>) {
       ::new (storage_) EF(std::forward<Fn>(fn));
@@ -137,9 +177,10 @@ public:
   scope_fail_impl(EF &&other) noexcept(
       std::is_nothrow_move_constructible_v<EF> ||
       std::is_nothrow_copy_constructible_v<EF>)
-    requires(std::is_nothrow_move_constructible_v<EF> ||
-             std::is_copy_constructible_v<EF>)
+    requires scope_fail_move_construct_overload_concept<EF>
+
       : dismissed_(other.dismissed_), exception_count_(other.exception_count_) {
+
     static_assert(!std::is_nothrow_move_constructible_v<EF> ||
                       std::is_move_constructible_v<EF>,
                   "This is Undefined Behavior!");
@@ -147,11 +188,12 @@ public:
                       std::is_copy_constructible_v<EF>,
                   "This is Undefined Behavior!");
 
+    auto &other_ef = *reinterpret_cast<EF *>(other.storage_);
+
     if constexpr (std::is_nothrow_move_constructible_v<EF>) {
-      ::new (storage_)
-          EF(std::forward<EF>(reinterpret_cast<EF &>(other.storage_)));
+      ::new (storage_) EF(std::forward<EF>(other_ef));
     } else {
-      ::new (storage_) EF(reinterpret_cast<EF &>(other.storage_));
+      ::new (storage_) EF(other_ef);
     }
 
     other.release();
@@ -160,17 +202,17 @@ public:
   scope_fail_impl(const scope_fail_impl &) = delete;
 
   ~scope_fail_impl() noexcept {
-    if (std::uncaught_exceptions() > exception_count_ && !dismissed_) {
-      auto &ef = *reinterpret_cast<EF *>(storage_);
+    auto &ef = *reinterpret_cast<EF *>(storage_);
 
+    if (std::uncaught_exceptions() > exception_count_ && !dismissed_) {
       try {
         std::invoke(ef);
       } catch (...) {
         assert("This is Undefined behavior!");
       }
-
-      ef.~EF();
     }
+
+    ef.~EF();
   }
 
   scope_fail_impl &operator=(const scope_fail_impl &) = delete;
@@ -185,25 +227,40 @@ private:
 
 }; // class scope_fail_impl
 
-/**
- * @brief scope_success_impl
- *
- */
-
+/**************************************/
+// class scope_success_impl
+/**************************************/
 namespace {
 template <typename EF>
 concept scope_success_ef_concept = scope_exit_ef_concept<EF>;
-}
 
+template <typename EF, typename Fn, typename Self>
+concept scope_success_construct_overload_concept =
+    !std::is_same_v<std::remove_cvref_t<Fn>, Self> &&
+    std::is_constructible_v<EF, Fn>;
+
+template <typename EF>
+concept scope_success_move_construct_overload_concept =
+    std::is_nothrow_move_constructible_v<EF> ||
+    std::is_copy_constructible_v<EF>;
+} // namespace
+
+/**
+ * @brief This is the implementation of scope_success
+ *
+ * @tparam EF
+ */
 template <scope_success_ef_concept EF> class scope_success_impl {
 public:
   template <typename Fn>
-    requires(!std::is_same_v<std::remove_cvref_t<Fn>, scope_success_impl<EF>> &&
-             std::is_constructible_v<EF, Fn>)
+    requires scope_success_construct_overload_concept<EF, Fn,
+                                                      scope_success_impl<EF>>
   explicit scope_success_impl(Fn &&fn) noexcept(
       std::is_nothrow_constructible_v<EF, Fn> ||
       std::is_nothrow_constructible_v<EF, Fn &>)
+
       : dismissed_(false), exception_count_(std::uncaught_exceptions()) {
+
     if constexpr ((!std::is_lvalue_reference_v<EF>) &&
                   std::is_nothrow_constructible_v<EF, Fn>) {
       ::new (storage_) EF(std::forward<Fn>(fn));
@@ -220,8 +277,7 @@ public:
   scope_success_impl(EF &&other) noexcept(
       std::is_nothrow_move_constructible_v<EF> ||
       std::is_nothrow_copy_constructible_v<EF>)
-    requires(std::is_nothrow_move_constructible_v<EF> ||
-             std::is_copy_constructible_v<EF>)
+    requires scope_success_move_construct_overload_concept<EF>
       : dismissed_(other.dismissed_), exception_count_(other.exception_count_) {
     static_assert(!std::is_nothrow_move_constructible_v<EF> ||
                       std::is_move_constructible_v<EF>,
@@ -231,11 +287,12 @@ public:
                       std::is_copy_constructible_v<EF>,
                   "This is Undefined Behavior!");
 
+    auto &other_ef = *reinterpret_cast<EF *>(other.storage_);
+
     if constexpr (std::is_nothrow_move_constructible_v<EF>) {
-      ::new (storage_)
-          EF(std::forward<EF>(reinterpret_cast<EF &>(other.storage_)));
+      ::new (storage_) EF(std::forward<EF>(other_ef));
     } else {
-      ::new (storage_) EF(reinterpret_cast<EF &>(other.storage_));
+      ::new (storage_) EF(other_ef);
     }
     other.release();
   }
@@ -245,19 +302,19 @@ public:
   scope_success_impl &operator=(const scope_success_impl &) = delete;
   scope_success_impl &operator=(scope_success_impl &&) = delete;
 
-  ~scope_success_impl() noexcept {
-    if (std::uncaught_exceptions() < exception_count_ && !dismissed_) {
-      auto &ef = *reinterpret_cast<EF *>(storage_);
+  ~scope_success_impl() noexcept(noexcept(std::declval<EF &>()())) {
+    auto &ef = *reinterpret_cast<EF *>(storage_);
 
+    if (std::uncaught_exceptions() < exception_count_ && !dismissed_) {
       try {
         std::invoke(ef);
       } catch (...) {
         ef.~EF();
         throw;
       }
-
-      ef.~EF();
     }
+
+    ef.~EF();
   }
 
   void release() noexcept { dismissed_ = true; }
@@ -269,10 +326,9 @@ private:
 
 }; // class scope_success_impl
 
-/**
- * @brief unique_resource_impl
- *
- */
+/**************************************/
+// class unique_resource_impl
+/**************************************/
 namespace {
 template <typename R>
 concept unique_resource_R_concept =
@@ -288,20 +344,24 @@ concept unique_resource_D_concept =
      std::is_object_v<D>) &&
     (std::is_copy_constructible_v<D> ||
      std::is_nothrow_move_constructible_v<R>) &&
-    (requires(D d, std::remove_reference_t<R> r) { d(r); });
+    (requires(D &d, std::remove_reference_t<R> &r) { d(r); });
 } // namespace
 
 template <unique_resource_R_concept R, unique_resource_D_concept<R> D>
-class unique_resource_impl : private D {
+class unique_resource_impl {
   using RS =
       std::conditional<std::is_object_v<R>, R,
                        std::reference_wrapper<std::remove_reference_t<R>>>;
+  using UnrefR = std::remove_reference_t<R>;
 
 public:
   unique_resource_impl()
     requires(std::is_default_constructible_v<R> &&
              std::is_default_constructible_v<D>)
-      : D(), resource_(), engaged_(false) {};
+      : engaged_(false) {
+    ::new (resource_) RS();
+    ::new (deleter_) D();
+  };
 
   template <class RR, class DD>
   unique_resource_impl(RR &&r, DD &&d) noexcept(
@@ -317,24 +377,120 @@ public:
               std::is_constructible_v<RS, RR &>) &&
              (std::is_nothrow_constructible_v<D, DD> ||
               std::is_constructible_v<D, DD &>))
-  {
-    // TODO
+      : engaged_(true) {
+    if constexpr (std::is_nothrow_constructible_v<RS, RR>) {
+      ::new (resource_) RS(std::forward<RR>(r));
+    } else {
+      try {
+        ::new (resource_) RS(r);
+      } catch (...) {
+        d(r);
+        throw;
+      }
+    }
+
+    if constexpr (std::is_nothrow_constructible_v<D, DD>) {
+      ::new (deleter_) D(std::forward<DD>(d));
+    } else {
+      try {
+        ::new (deleter_) D(d);
+      } catch (...) {
+        d(resource_);
+        throw;
+      }
+    }
   }
 
-  // unique_resource_impl(unique_resource_impl &&other) noexcept(
-  //     std::is_nothrow_move_constructible_v<R1> &&
-  //     std::is_nothrow_move_constructible_v<D>) {
-  //   // TODO
-  // }
+  unique_resource_impl(unique_resource_impl &&other) noexcept(
+      std::is_nothrow_move_constructible_v<RS> &&
+      std::is_nothrow_move_constructible_v<D>)
+      : engaged_(other.engaged_) {
+    if constexpr (std::is_nothrow_move_constructible_v<RS>) {
+      ::new (resource_) RS(std::move(*reinterpret_cast<RS *>(other.resource_)));
+    } else {
+      ::new (resource_) RS(*reinterpret_cast<RS *>(other.resource_));
+    }
+
+    if constexpr (std::is_nothrow_move_constructible_v<D>) {
+      ::new (deleter_) D(std::move(*reinterpret_cast<D *>(other.deleter_)));
+    } else {
+      try {
+        ::new (deleter_) D(*reinterpret_cast<D *>(other.deleter_));
+      } catch (...) {
+        if constexpr (std::is_nothrow_move_constructible_v<RS>) {
+          if (other.engaged_) {
+            reinterpret_cast<D *>(other.deleter_)
+                ->operator()(*reinterpret_cast<RS *>(other.resource_));
+            other.release();
+          }
+        }
+        throw;
+      }
+    }
+
+    other.release();
+  }
 
   ~unique_resource_impl() { reset(); }
 
   unique_resource_impl &operator=(unique_resource_impl &&other) noexcept(
       std::is_nothrow_move_assignable_v<RS> &&
       std::is_nothrow_move_assignable_v<D>) {
-    // static_assert(, "This is Undefined Behavior!");
-    // TODO
+    static_assert((!std::is_nothrow_move_assignable_v<RS> ||
+                   std::is_move_assignable_v<RS>) ||
+                      std::is_copy_constructible_v<RS>,
+                  "This is Undefined Behavior!");
+    static_assert((!std::is_nothrow_move_assignable_v<D> ||
+                   std::is_move_assignable_v<D>) ||
+                      std::is_copy_constructible_v<D>,
+                  "This is Undefined Behavior!");
+
     reset();
+
+    if constexpr (!std::is_nothrow_move_assignable_v<D> &&
+                  std::is_nothrow_move_assignable_v<RS>) {
+      if constexpr (std::is_nothrow_move_assignable_v<RS>) {
+        resource_ = std::move(other.resource_);
+      } else {
+        resource_ = other.resource_;
+      }
+
+      if constexpr (std::is_nothrow_move_assignable_v<D>) {
+        deleter_ = std::move(other.deleter_);
+      } else {
+        try {
+          deleter_ = other.deleter_;
+        } catch (...) {
+          if constexpr (std::is_nothrow_move_assignable_v<RS>) {
+            other.resource_ = std::move(resource_);
+          }
+          throw;
+        }
+      }
+    } else {
+      if constexpr (std::is_nothrow_move_assignable_v<D>) {
+        deleter_ = std::move(other.deleter_);
+      } else {
+        deleter_ = other.deleter_;
+      }
+
+      if constexpr (std::is_nothrow_move_assignable_v<RS>) {
+        resource_ = std::move(other.resource_);
+      } else {
+        try {
+          resource_ = other.resource_;
+        } catch (...) {
+          if constexpr (std::is_nothrow_move_assignable_v<D>) {
+            other.deleter_ = std::move(deleter_);
+          }
+          throw;
+        }
+      }
+    }
+
+    engaged_ = other.engaged_;
+    other.release();
+    return *this;
   }
 
   void release() noexcept { engaged_ = false; }
@@ -342,7 +498,15 @@ public:
   void reset() noexcept {
     if (engaged_) {
       try {
-        D::operator()(resource_);
+        auto &d = *reinterpret_cast<D *>(&deleter_);
+
+        if constexpr (std::is_object_v<R>) {
+          auto &r = *reinterpret_cast<RS *>(&resource_);
+          d(r);
+        } else {
+          auto &r = *reinterpret_cast<RS *>(&resource_);
+          d(r.get());
+        }
       } catch (...) {
         assert("This is Undefined behavior!");
       }
@@ -356,12 +520,15 @@ public:
 
     if constexpr (std::is_nothrow_assignable_v<RS, RR>) {
       resource_ = std::forward<RR>(r);
-
     } else {
       try {
         resource_ = std::as_const(r);
       } catch (...) {
-        D::operator()(r);
+        try {
+          reinterpret_cast<D *>(deleter_)->operator()(r);
+        } catch (...) {
+          assert("This is Undefined behavior!");
+        }
         engaged_ = false;
         throw;
       }
@@ -372,49 +539,35 @@ public:
 
   const R &get() const noexcept {
     if constexpr (std::is_object_v<R>) {
-      return resource_;
+      return *reinterpret_cast<const RS *>(&resource_);
     } else {
-      return resource_.get();
+      return reinterpret_cast<const RS *>(&resource_)->get();
     }
   }
 
-  const D &get_deleter() const noexcept { return *this; }
+  const D &get_deleter() const noexcept {
+    return *reinterpret_cast<const D *>(&deleter_);
+  }
 
   std::add_lvalue_reference_t<std::remove_pointer_t<R>>
   operator*() const noexcept
     requires(std::is_pointer_v<R> &&
              (!std::is_void_v<std::remove_pointer_t<R>>))
   {
-    static_assert(std::is_object_v<std::remove_reference_t<R>> ||
-                      std::is_function_v<std::remove_reference_t<R>>,
-                  "This is Undefined Behavior!");
-
     return *get();
   }
 
   R operator->() const noexcept
     requires(std::is_pointer_v<R>)
   {
-    static_assert(std::is_pointer_v<R>, "This is Undefined Behavior!");
-
     return get();
   }
 
 private:
-  RS resource_;
+  alignas(alignof(RS)) std::byte resource_[sizeof(RS)];
+  alignas(alignof(D)) std::byte deleter_[sizeof(D)];
   bool engaged_;
 };
-
-// template< class R, class D, class S = std::decay_t<R> >
-
-// [[nodiscard]] inline  unique_resource<std::decay_t<R>, std::decay_t<D>>
-//     make_unique_resource_checked( R&& r, const S& invalid, D&& d ) noexcept(
-
-//     std::is_nothrow_constructible_v<std::decay_t<R>, R> &&
-//     std::is_nothrow_constructible_v<std::decay_t<D>, D>
-// ) {
-//   // TODO
-// }
 
 } // namespace hy::impl
 
