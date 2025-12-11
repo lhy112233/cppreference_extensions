@@ -450,6 +450,9 @@ public:
                       std::is_copy_constructible_v<D>,
                   "This is Undefined Behavior!");
 
+    if (this == &other)
+      return *this;
+
     reset();
 
     if constexpr (!std::is_nothrow_move_assignable_v<D> &&
