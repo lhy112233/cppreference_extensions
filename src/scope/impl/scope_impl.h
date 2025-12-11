@@ -156,7 +156,7 @@ public:
       std::is_nothrow_constructible_v<EF, Fn> ||
       std::is_nothrow_constructible_v<EF, Fn &>)
 
-      : dismissed_(false), exception_count_(std::uncaught_exceptions()) {
+      : exception_count_(std::uncaught_exceptions()) {
 
     if constexpr (!std::is_lvalue_reference_v<Fn> &&
                   std::is_nothrow_constructible_v<EF, Fn>) {
@@ -176,7 +176,7 @@ public:
       std::is_nothrow_copy_constructible_v<EF>)
     requires scope_fail_move_construct_overload_concept<EF>
 
-      : dismissed_(other.dismissed_), exception_count_(other.exception_count_) {
+      : exception_count_(other.exception_count_) {
 
     static_assert(!std::is_nothrow_move_constructible_v<EF> ||
                       std::is_move_constructible_v<EF>,
@@ -201,7 +201,7 @@ public:
   ~scope_fail_impl() noexcept {
     auto ef = std::launder(reinterpret_cast<EF *>(storage_));
 
-    if (std::uncaught_exceptions() > exception_count_ && !dismissed_) {
+    if (std::uncaught_exceptions() > exception_count_ && !is_released()) {
       try {
         std::invoke(*ef);
       } catch (...) {
@@ -215,12 +215,13 @@ public:
   scope_fail_impl &operator=(const scope_fail_impl &) = delete;
   scope_fail_impl &operator=(scope_fail_impl &&) = delete;
 
-  void release() noexcept { dismissed_ = true; }
+  void release() noexcept { exception_count_ = -1; }
 
 private:
-  bool dismissed_;
-  std::size_t exception_count_;
+  int exception_count_;
   alignas(alignof(EF)) std::byte storage_[sizeof(EF)];
+
+  [[nodiscard]] bool is_released() const noexcept { return exception_count_ == -1; }
 
 }; // class scope_fail_impl
 
@@ -256,7 +257,7 @@ public:
       std::is_nothrow_constructible_v<EF, Fn> ||
       std::is_nothrow_constructible_v<EF, Fn &>)
 
-      : dismissed_(false), exception_count_(std::uncaught_exceptions()) {
+      : exception_count_(std::uncaught_exceptions()) {
 
     if constexpr ((!std::is_lvalue_reference_v<EF>) &&
                   std::is_nothrow_constructible_v<EF, Fn>) {
@@ -275,7 +276,7 @@ public:
       std::is_nothrow_move_constructible_v<EF> ||
       std::is_nothrow_copy_constructible_v<EF>)
     requires scope_success_move_construct_overload_concept<EF>
-      : dismissed_(other.dismissed_), exception_count_(other.exception_count_) {
+      : exception_count_(other.exception_count_) {
     static_assert(!std::is_nothrow_move_constructible_v<EF> ||
                       std::is_move_constructible_v<EF>,
                   "This is Undefined Behavior!");
@@ -302,7 +303,7 @@ public:
   ~scope_success_impl() noexcept(noexcept(std::declval<EF &>()())) {
     auto ef = std::launder(reinterpret_cast<EF *>(storage_));
 
-    if (std::uncaught_exceptions() <= exception_count_ && !dismissed_) {
+    if (std::uncaught_exceptions() <= exception_count_ && !is_released()) {
       try {
         std::invoke(*ef);
       } catch (...) {
@@ -314,13 +315,15 @@ public:
     ef->~EF();
   }
 
-  void release() noexcept { dismissed_ = true; }
+  void release() noexcept { exception_count_ = -1; }
 
 private:
-  bool dismissed_;
-  std::size_t exception_count_;
+  int exception_count_;
   alignas(alignof(EF)) std::byte storage_[sizeof(EF)];
 
+  [[nodiscard]] bool is_released() const noexcept {
+    return exception_count_ == -1;
+  }
 }; // class scope_success_impl
 
 /**************************************/
