@@ -89,7 +89,7 @@ public:
                       std::is_copy_constructible_v<EF>,
                   "This is Undefined Behavior!");
 
-    auto &other_ef = *reinterpret_cast<exitfun *>(other.storage_);
+    auto &other_ef = *std::launder(reinterpret_cast<exitfun *>(other.storage_));
 
     if constexpr (std::is_nothrow_move_constructible_v<EF>) {
       ::new (storage_) EF(std::forward<EF>(other_ef));
@@ -105,7 +105,7 @@ public:
   scope_exit_impl &operator=(scope_exit_impl &&) = delete;
 
   ~scope_exit_impl() noexcept {
-    auto &ef = *reinterpret_cast<exitfun *>(storage_);
+    auto &ef = *std::launder(reinterpret_cast<exitfun *>(storage_));
 
     if (!dismissed_) {
       try {
@@ -188,7 +188,7 @@ public:
                       std::is_copy_constructible_v<EF>,
                   "This is Undefined Behavior!");
 
-    auto &other_ef = *reinterpret_cast<EF *>(other.storage_);
+    auto &other_ef = *std::launder(reinterpret_cast<EF *>(other.storage_));
 
     if constexpr (std::is_nothrow_move_constructible_v<EF>) {
       ::new (storage_) EF(std::forward<EF>(other_ef));
@@ -202,7 +202,7 @@ public:
   scope_fail_impl(const scope_fail_impl &) = delete;
 
   ~scope_fail_impl() noexcept {
-    auto &ef = *reinterpret_cast<EF *>(storage_);
+    auto &ef = *std::launder(reinterpret_cast<EF *>(storage_));
 
     if (std::uncaught_exceptions() > exception_count_ && !dismissed_) {
       try {
@@ -287,10 +287,10 @@ public:
                       std::is_copy_constructible_v<EF>,
                   "This is Undefined Behavior!");
 
-    auto &other_ef = *reinterpret_cast<EF *>(other.storage_);
+    auto &other_ef = *std::launder(reinterpret_cast<EF *>(other.storage_));
 
     if constexpr (std::is_nothrow_move_constructible_v<EF>) {
-      ::new (storage_) EF(std::forward<EF>(other_ef));
+      ::new (storage_) EF(std::forward<EF>(other_ef)); 
     } else {
       ::new (storage_) EF(other_ef);
     }
@@ -303,9 +303,9 @@ public:
   scope_success_impl &operator=(scope_success_impl &&) = delete;
 
   ~scope_success_impl() noexcept(noexcept(std::declval<EF &>()())) {
-    auto &ef = *reinterpret_cast<EF *>(storage_);
+    auto &ef = *std::launder(reinterpret_cast<EF *>(storage_));
 
-    if (std::uncaught_exceptions() < exception_count_ && !dismissed_) {
+    if (std::uncaught_exceptions() <= exception_count_ && !dismissed_) {
       try {
         std::invoke(ef);
       } catch (...) {
@@ -396,6 +396,7 @@ public:
         ::new (deleter_) D(d);
       } catch (...) {
         d(resource_);
+        resource_.~RS();
         throw;
       }
     }
@@ -405,22 +406,29 @@ public:
       std::is_nothrow_move_constructible_v<RS> &&
       std::is_nothrow_move_constructible_v<D>)
       : engaged_(other.engaged_) {
-    if constexpr (std::is_nothrow_move_constructible_v<RS>) {
-      ::new (resource_) RS(std::move(*reinterpret_cast<RS *>(other.resource_)));
-    } else {
-      ::new (resource_) RS(*reinterpret_cast<RS *>(other.resource_));
+    if (other.engaged_) {
+      if constexpr (std::is_nothrow_move_constructible_v<RS>) {
+        ::new (resource_) RS(
+            std::move(*std::launder(reinterpret_cast<RS *>(other.resource_))));
+      } else {
+        ::new (resource_)
+            RS(*std::launder(reinterpret_cast<RS *>(other.resource_)));
+      }
     }
 
     if constexpr (std::is_nothrow_move_constructible_v<D>) {
-      ::new (deleter_) D(std::move(*reinterpret_cast<D *>(other.deleter_)));
+      ::new (deleter_)
+          D(std::move(*std::launder(reinterpret_cast<D *>(other.deleter_))));
     } else {
       try {
-        ::new (deleter_) D(*reinterpret_cast<D *>(other.deleter_));
+        ::new (deleter_)
+            D(*std::launder(reinterpret_cast<D *>(other.deleter_)));
       } catch (...) {
         if constexpr (std::is_nothrow_move_constructible_v<RS>) {
           if (other.engaged_) {
-            reinterpret_cast<D *>(other.deleter_)
-                ->operator()(*reinterpret_cast<RS *>(other.resource_));
+            other.get_deleter_helper()(resource_);
+            resource_.~RS();
+
             other.release();
           }
         }
@@ -431,7 +439,11 @@ public:
     other.release();
   }
 
-  ~unique_resource_impl() { reset(); }
+  ~unique_resource_impl() {
+    reset();
+    resource_.~RS();
+    deleter_.~D();
+  }
 
   unique_resource_impl &operator=(unique_resource_impl &&other) noexcept(
       std::is_nothrow_move_assignable_v<RS> &&
@@ -450,41 +462,47 @@ public:
     if constexpr (!std::is_nothrow_move_assignable_v<D> &&
                   std::is_nothrow_move_assignable_v<RS>) {
       if constexpr (std::is_nothrow_move_assignable_v<RS>) {
-        resource_ = std::move(other.resource_);
+        {
+          resource_ = std::move(other.get_resource_helper());
+        }
       } else {
-        resource_ = other.resource_;
+        resource_ = other.get_resource_helper();
       }
 
-      if constexpr (std::is_nothrow_move_assignable_v<D>) {
-        deleter_ = std::move(other.deleter_);
-      } else {
-        try {
-          deleter_ = other.deleter_;
-        } catch (...) {
-          if constexpr (std::is_nothrow_move_assignable_v<RS>) {
-            other.resource_ = std::move(resource_);
-          }
-          throw;
+      try {
+        if constexpr (std::is_nothrow_move_assignable_v<D>) {
+          deleter_ = std::move(other.get_deleter_helper());
+        } else {
+          deleter_ = other.get_deleter_helper();
         }
+      } catch (...) {
+        if constexpr (std::is_nothrow_move_assignable_v<RS>) {
+          other.get_resource_helper() = std::move(get_resource_helper());
+        }
+        resource_.~RS();
+        throw;
       }
+
     } else {
+
       if constexpr (std::is_nothrow_move_assignable_v<D>) {
-        deleter_ = std::move(other.deleter_);
+        deleter_ = std::move(other.get_deleter_helper());
       } else {
-        deleter_ = other.deleter_;
+        deleter_ = other.get_deleter_helper();
       }
 
-      if constexpr (std::is_nothrow_move_assignable_v<RS>) {
-        resource_ = std::move(other.resource_);
-      } else {
-        try {
-          resource_ = other.resource_;
-        } catch (...) {
-          if constexpr (std::is_nothrow_move_assignable_v<D>) {
-            other.deleter_ = std::move(deleter_);
-          }
-          throw;
+      try {
+        if constexpr (std::is_nothrow_move_assignable_v<RS>) {
+          resource_ = std::move(other.get_resource_helper());
+        } else {
+          resource_ = other.get_resource_helper();
         }
+      } catch (...) {
+        if constexpr (std::is_nothrow_move_assignable_v<D>) {
+          other.get_deleter_helper() = std::move(get_deleter_helper());
+        }
+        deleter_.~D();
+        throw;
       }
     }
 
@@ -497,19 +515,7 @@ public:
 
   void reset() noexcept {
     if (engaged_) {
-      try {
-        auto &d = *reinterpret_cast<D *>(&deleter_);
-
-        if constexpr (std::is_object_v<R>) {
-          auto &r = *reinterpret_cast<RS *>(&resource_);
-          d(r);
-        } else {
-          auto &r = *reinterpret_cast<RS *>(&resource_);
-          d(r.get());
-        }
-      } catch (...) {
-        assert("This is Undefined behavior!");
-      }
+      get_deleter_helper()(get_resource_helper());
 
       engaged_ = false;
     }
@@ -518,42 +524,33 @@ public:
   template <typename RR> void reset(RR &&r) {
     reset();
 
-    if constexpr (std::is_nothrow_assignable_v<RS, RR>) {
-      resource_ = std::forward<RR>(r);
-    } else {
-      try {
-        resource_ = std::as_const(r);
-      } catch (...) {
-        try {
-          reinterpret_cast<D *>(deleter_)->operator()(r);
-        } catch (...) {
-          assert("This is Undefined behavior!");
-        }
-        engaged_ = false;
-        throw;
+    try {
+      if constexpr (std::is_nothrow_assignable_v<RS, RR>) {
+        resource_ = std::forward<RR>(r);
+      } else {
+        resource_ = r;
       }
+    } catch (...) {
+      get_deleter_helper()(r);
+      throw;
     }
 
     engaged_ = true;
   }
 
-  const R &get() const noexcept {
-    if constexpr (std::is_object_v<R>) {
-      return *reinterpret_cast<const RS *>(&resource_);
-    } else {
-      return reinterpret_cast<const RS *>(&resource_)->get();
-    }
-  }
+  const R &get() const noexcept { return get_resource_helper(); }
 
-  const D &get_deleter() const noexcept {
-    return *reinterpret_cast<const D *>(&deleter_);
-  }
+  const D &get_deleter() const noexcept { return get_deleter_helper(); }
 
   std::add_lvalue_reference_t<std::remove_pointer_t<R>>
   operator*() const noexcept
     requires(std::is_pointer_v<R> &&
              (!std::is_void_v<std::remove_pointer_t<R>>))
   {
+    static_assert(std::is_object_v<std::remove_pointer_t<R>> ||
+                      std::is_function_v<std::remove_pointer_t<R>>,
+                  "This is Undefined Behavior!");
+
     return *get();
   }
 
@@ -567,6 +564,25 @@ private:
   alignas(alignof(RS)) std::byte resource_[sizeof(RS)];
   alignas(alignof(D)) std::byte deleter_[sizeof(D)];
   bool engaged_;
+
+private:
+  auto get_resource_helper() noexcept -> R {
+    return *std::launder(reinterpret_cast<RS *>(resource_));
+  }
+
+  auto get_resource_helper() const noexcept -> const R {
+    return *std::launder(reinterpret_cast<const RS *>(resource_));
+  }
+
+  auto get_deleter_helper() noexcept -> D & {
+    return *std::launder(reinterpret_cast<D *>(deleter_));
+  }
+
+  auto get_deleter_helper() const noexcept -> const D & {
+    return *std::launder(reinterpret_cast<const D *>(deleter_));
+  }
+
+  // std::reference_wapper can auto convert to T&
 };
 
 } // namespace hy::impl

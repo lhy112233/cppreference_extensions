@@ -185,13 +185,18 @@ public:
   }
 
   /**
-   * @brief
-   *
+   * @brief Releases the ownership of the managed resource if any. The
+   * destructor will not execute the deleter after the call, unless reset is
+   * called later for managing new resource.
+   * Unlike std::unique_ptr::release, this function is not required to modify
+   * the stored resource handle.
    */
   void release() noexcept { impl_::release(); }
 
   /**
-   * @brief
+   * @brief Disposes the resource by calling the deleter with the underlying
+   * resource handle if the unique_resource owns it. The unique_resource does
+   * not own the resource after the call.
    *
    */
   void reset() noexcept { impl_::reset(); }
