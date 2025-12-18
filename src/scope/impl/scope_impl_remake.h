@@ -26,7 +26,7 @@ public:
 
   BoxRollbackHelper(BoxRollbackHelper &&other) noexcept(noexcept(F{
       std::move(other)}))
-      : F(std::move(other)), released_(other.released_) {
+      : F(static_cast<F &&>(other)), released_(other.released_) {
     other.released_ = true;
   }
 
@@ -271,13 +271,13 @@ public:
   template <typename... Args, typename Helper>
     requires std::is_nothrow_constructible_v<R, Args...>
   UniqueResourceData(Args &&...args, BoxRollbackHelper<Helper> helper) noexcept
-      : R(std::forward<Args>(args)...) {
+      : r_(std::forward<Args>(args)...) {
     helper.release();
   }
 
   template <typename... Args, typename Helper>
   UniqueResourceData(Args &&...args, BoxRollbackHelper<Helper> helper)
-      : R(args...) {
+      : r_(args...) {
     helper.release();
   }
 
