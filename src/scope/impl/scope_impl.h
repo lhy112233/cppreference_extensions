@@ -221,7 +221,9 @@ private:
   int exception_count_;
   alignas(alignof(EF)) std::byte storage_[sizeof(EF)];
 
-  [[nodiscard]] bool is_released() const noexcept { return exception_count_ == -1; }
+  [[nodiscard]] bool is_released() const noexcept {
+    return exception_count_ == -1;
+  }
 
 }; // class scope_fail_impl
 
