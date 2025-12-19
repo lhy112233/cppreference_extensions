@@ -1,0 +1,92 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": { "major": 3, "minor": 19, "patch": 0 },
+    "configurePresets": [
+        {
+            "name": "default-gcc",
+            "displayName": "Default Debug (g++)",
+            "description": "Configure for local development (Debug) using Ninja and g++",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "default-clang",
+            "displayName": "Default Debug (clang++)",
+            "description": "Configure for local development (Debug) using Ninja and clang++",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "release-gcc",
+            "displayName": "Release (g++)",
+            "description": "Configure optimized release build using Ninja and g++",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "gcc",
+                "CMAKE_CXX_COMPILER": "g++",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        },
+        {
+            "name": "release-clang",
+            "displayName": "Release (clang++)",
+            "description": "Configure optimized release build using Ninja and clang++",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_C_COMPILER": "clang",
+                "CMAKE_CXX_COMPILER": "clang++",
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "default-gcc",
+            "displayName": "Build Debug (g++)",
+            "configurePreset": "default-gcc",
+            "configuration": "Debug",
+            "jobs": 4,
+            "targets": [ "all" ]
+        },
+        {
+            "name": "default-clang",
+            "displayName": "Build Debug (clang++)",
+            "configurePreset": "default-clang",
+            "configuration": "Debug",
+            "jobs": 4,
+            "targets": [ "all" ]
+        },
+        {
+            "name": "release-gcc",
+            "displayName": "Build Release (g++)",
+            "configurePreset": "release-gcc",
+            "configuration": "Release",
+            "jobs": 4,
+            "targets": [ "all" ]
+        },
+        {
+            "name": "release-clang",
+            "displayName": "Build Release (clang++)",
+            "configurePreset": "release-clang",
+            "configuration": "Release",
+            "jobs": 4,
+            "targets": [ "all" ]
+        }
+    ]
+}
