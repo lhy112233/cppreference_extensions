@@ -1,13 +1,6 @@
 project(scope VERSION 0.0.1 LANGUAGES CXX)
 
-
-
 add_library(${PROJECT_NAME} INTERFACE)
-
-target_sources(${PROJECT_NAME}
-    PRIVATE
-        
-)
 
 target_include_directories(${PROJECT_NAME} 
 INTERFACE

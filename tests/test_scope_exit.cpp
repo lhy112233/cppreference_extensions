@@ -1,9 +1,8 @@
 #include "scope.h"
-#include <algorithm>
-#include <functional>
+#include <exception>
 #include <gtest/gtest.h>
-#include <print>
-#include <type_traits>
+
+using namespace hy;
 
 namespace {
 static int no_object_test_counter = 0;
@@ -14,99 +13,7 @@ public:
   void operator()() {}
 };
 
-class OnlyCopyConstruct : public Function {
-public:
-  OnlyCopyConstruct() = default;
-  OnlyCopyConstruct(const OnlyCopyConstruct &) { no_object_test_counter++; }
-  OnlyCopyConstruct(OnlyCopyConstruct &&) = delete;
-  OnlyCopyConstruct &operator=(const OnlyCopyConstruct &) = delete;
-  OnlyCopyConstruct &operator=(OnlyCopyConstruct &&) = delete;
-};
-
-class OnlyNothrowMoveConstruct : public Function {
-public:
-  OnlyNothrowMoveConstruct() = default;
-  OnlyNothrowMoveConstruct(const OnlyNothrowMoveConstruct &) = delete;
-  OnlyNothrowMoveConstruct(OnlyNothrowMoveConstruct &&) noexcept {
-    no_object_test_counter++;
-    no_object_test_counter++;
-  }
-  OnlyNothrowMoveConstruct &
-  operator=(const OnlyNothrowMoveConstruct &) = delete;
-  OnlyNothrowMoveConstruct &operator=(OnlyNothrowMoveConstruct &&) = delete;
-};
-
-class OnlyMoveAndCopyConstruct : public Function {
-public:
-  OnlyMoveAndCopyConstruct() = default;
-  OnlyMoveAndCopyConstruct(const OnlyMoveAndCopyConstruct &) {
-    no_object_test_counter++;
-  }
-  OnlyMoveAndCopyConstruct(OnlyMoveAndCopyConstruct &&) {
-    no_object_test_counter++;
-    no_object_test_counter++;
-  }
-  OnlyMoveAndCopyConstruct &
-  operator=(const OnlyMoveAndCopyConstruct &) = delete;
-  OnlyMoveAndCopyConstruct &operator=(OnlyMoveAndCopyConstruct &&) = delete;
-};
-
-class OnlyNothrowMoveAndCopyConstruct : public Function {
-public:
-  OnlyNothrowMoveAndCopyConstruct() = default;
-  OnlyNothrowMoveAndCopyConstruct(
-      const OnlyNothrowMoveAndCopyConstruct &) noexcept {
-    no_object_test_counter++;
-  }
-  OnlyNothrowMoveAndCopyConstruct(OnlyNothrowMoveAndCopyConstruct &&) noexcept {
-    no_object_test_counter++;
-    no_object_test_counter++;
-  }
-  OnlyNothrowMoveAndCopyConstruct &
-  operator=(const OnlyNothrowMoveAndCopyConstruct &) = delete;
-  OnlyNothrowMoveAndCopyConstruct &
-  operator=(OnlyNothrowMoveAndCopyConstruct &&) = delete;
-};
-
-class OnlyMoveConstruct : public Function {
-public:
-  OnlyMoveConstruct() = default;
-  OnlyMoveConstruct(const OnlyMoveConstruct &) = delete;
-  OnlyMoveConstruct(OnlyMoveConstruct &&) {
-    no_object_test_counter++;
-    no_object_test_counter++;
-  }
-  OnlyMoveConstruct &operator=(const OnlyMoveConstruct &) = delete;
-  OnlyMoveConstruct &operator=(OnlyMoveConstruct &&) = delete;
-};
-
 } // namespace
-
-// Compile-time checks for scope_exit
-static_assert(!std::is_default_constructible_v<hy::scope_exit<void (*)()>>,
-              "scope_exit should not be default constructible");
-static_assert(!std::is_default_constructible_v<hy::scope_exit<decltype([] {})>>,
-              "scope_exit should not be default constructible");
-static_assert(!std::is_copy_assignable_v<hy::scope_exit<void (*)()>>,
-              "scope_exit should not be copy assignable");
-static_assert(!std::is_copy_assignable_v<hy::scope_exit<decltype([] {})>>,
-              "scope_exit should not be copy assignable");
-static_assert(!std::is_move_assignable_v<hy::scope_exit<void (*)()>>,
-              "scope_exit should not be move assignable");
-static_assert(!std::is_move_assignable_v<hy::scope_exit<decltype([] {})>>,
-              "scope_exit should not be move assignable");
-static_assert(!std::is_copy_constructible_v<hy::scope_exit<void (*)()>>,
-              "scope_exit should be copy constructible");
-static_assert(!std::is_copy_constructible_v<hy::scope_exit<decltype([] {})>>,
-              "scope_exit should be move constructible");
-static_assert(std::is_move_constructible_v<hy::scope_exit<void (*)()>>,
-              "scope_exit should be move constructible");
-static_assert(std::is_move_constructible_v<hy::scope_exit<decltype([] {})>>,
-              "scope_exit should be move constructible");
-// static_assert(
-//     !std::is_constructible_v<hy::scope_exit<decltype(OnlyMoveConstruct{})>,
-//                              hy::scope_exit<decltype(OnlyMoveConstruct{})>>,
-//     "scope_exit should not be constructible with OnlyMoveConstruct");
 
 class ScopeExitTest : public ::testing::Test {
 protected:
@@ -127,86 +34,181 @@ private:
   int counter_;
 };
 
-TEST_F(ScopeExitTest, release_test) {
-  {
-    hy::scope_exit exit_scope([this]() { add_counter(); });
-    exit_scope.release();
-  }
-  EXPECT_EQ(get_counter(), 0);
+// Tips:
+/*TEST_F(ScopeExitTest, OnlyCopyConstruct) {
+  class OnlyCopyConstruct : public Function {
+    OnlyCopyConstruct() = default;
+    OnlyCopyConstruct(const OnlyCopyConstruct &) {}
+    OnlyCopyConstruct(OnlyCopyConstruct &&) = delete; // this is a key method
+  };
+
+  // this is could not be compile,
+  // because match OnlyCopyConstruct(OnlyCopyConstruct&&) = delete;
+   scope_exit a{OnlyCopyConstruct{}};
+
+  // but this is a good assert
+  static_assert(
+  std::is_constructible_v<decltype(a), OnlyCopyConstruct&&>,
+   "...");
+} */
+
+TEST_F(ScopeExitTest, OnlyCopyConstruct) {
+  class OnlyCopyConstruct : public Function {
+  public:
+    OnlyCopyConstruct() { no_object_test_counter++; }
+    OnlyCopyConstruct(const OnlyCopyConstruct &) {
+      no_object_test_counter += 2;
+    }
+    OnlyCopyConstruct &operator=(const OnlyCopyConstruct &) {
+      no_object_test_counter += 3;
+      return *this;
+    }
+    ~OnlyCopyConstruct() { no_object_test_counter += 4; }
+
+    void operator()() { no_object_test_counter += 5; }
+  };
 
   {
-    hy::scope_exit exit_scope(no_object_test_function);
-    exit_scope.release();
-  }
-  EXPECT_EQ(no_object_test_counter, 0);
-}
+    {
+      // Init + copy construct -> 1 + 4 + 2
+      scope_exit scope1{OnlyCopyConstruct{}};
+      EXPECT_EQ(no_object_test_counter, 7);
 
-TEST_F(ScopeExitTest, invoke_test) {
-  {
-    hy::scope_exit exit_scope([this]() { add_counter(); });
-  }
-  EXPECT_EQ(get_counter(), 1);
-
-  {
-    hy::scope_exit exit_scope(no_object_test_function);
-  }
-  EXPECT_EQ(no_object_test_counter, 1);
-}
-
-TEST_F(ScopeExitTest, move_construct_test) {
-  {
-    hy::scope_exit exit_scope1([this]() { add_counter(); });
-    hy::scope_exit exit_scope2(std::move(exit_scope1));
-  }
-  EXPECT_EQ(get_counter(), 1);
-
-  {
-    hy::scope_exit exit_scope1(no_object_test_function);
-    hy::scope_exit exit_scope2(std::move(exit_scope1));
-  }
-  EXPECT_EQ(no_object_test_counter, 1);
-}
-
-TEST_F(ScopeExitTest, move_construct_only_copy_test) {
-  {
-    OnlyCopyConstruct only_copy_construct;
-
-    hy::scope_exit exit_scope1(only_copy_construct);
-    EXPECT_EQ(no_object_test_counter, 1);
-
-    hy::scope_exit exit_scope2(std::move(exit_scope1));
-    EXPECT_EQ(no_object_test_counter, 2);
+      // copy construct -> 2
+      scope_exit scope2(std::move(scope1));
+      EXPECT_EQ(no_object_test_counter, 9);
+    }
+    // 2x ~() and operator()() -> 2x4 + 5
+    EXPECT_EQ(no_object_test_counter, 22);
   }
 }
 
-TEST_F(ScopeExitTest, move_construct_only_nothrow_move_test) {
-  {
-    hy::scope_exit exit_scope1(OnlyNothrowMoveConstruct{});
-    EXPECT_EQ(no_object_test_counter, 2);
+/*TEST_F(ScopeExitTest, OnlyMoveConstruct) {
+  class OnlyMoveConstruct : public Function {
+    public:
+    OnlyMoveConstruct() = default;
+    OnlyMoveConstruct(OnlyMoveConstruct&&) {}
+  };
 
-    hy::scope_exit exit_scope2(std::move(exit_scope1));
+  // scope_exit scope{OnlyMoveConstruct{}};  // this is bad
+} */
+
+TEST_F(ScopeExitTest, MoveAndCopyConstruct) {
+  class MoveAndCopyConstruct {
+  public:
+    MoveAndCopyConstruct() { no_object_test_counter++; }
+    MoveAndCopyConstruct(const MoveAndCopyConstruct &) {
+      no_object_test_counter += 2;
+    }
+    MoveAndCopyConstruct(MoveAndCopyConstruct &&) {
+      no_object_test_counter += 3;
+    }
+    ~MoveAndCopyConstruct() { no_object_test_counter += 4; }
+
+    void operator()() { no_object_test_counter += 5; }
+  };
+
+  {
+    EXPECT_EQ(no_object_test_counter, 0);
+
+    scope_exit scope1{MoveAndCopyConstruct{}};
+    // default construct + copy + ~() -> 1 + 2 + 4
+    EXPECT_EQ(no_object_test_counter, 7);
+
+    scope_exit scope2{std::move(scope1)};
+    // copy -> 2
+    EXPECT_EQ(no_object_test_counter, 9);
+  }
+
+  // ~() x 2 + operator()() -> 4 x 2 + 5
+  EXPECT_EQ(no_object_test_counter, 22);
+}
+
+TEST_F(ScopeExitTest, NothrowMoveAndCopy) {
+  class NothrowMoveAndCopy : public Function {
+  public:
+    NothrowMoveAndCopy() { no_object_test_counter++; }
+    NothrowMoveAndCopy(const NothrowMoveAndCopy &) {
+      no_object_test_counter += 2;
+    }
+    NothrowMoveAndCopy(NothrowMoveAndCopy &&) noexcept {
+      no_object_test_counter += 3;
+    }
+    ~NothrowMoveAndCopy() { no_object_test_counter += 4; }
+
+    void operator()() { no_object_test_counter += 5; }
+  };
+
+  {
+    EXPECT_EQ(no_object_test_counter, 0);
+
+    scope_exit scope1{NothrowMoveAndCopy{}};
+    // default construct + move construct + ~() -> 1 + 3 + 4
+    EXPECT_EQ(no_object_test_counter, 8);
+
+    scope_exit scope2(std::move(scope1));
+    // move construct -> 3
+    EXPECT_EQ(no_object_test_counter, 11);
+  }
+
+  // ~() x 2 + operator()() -> 4 x2 + 5
+  EXPECT_EQ(no_object_test_counter, 24);
+}
+
+TEST_F(ScopeExitTest, ConstructThrowException) {
+  class ConstructThrowException : public Function {
+  public:
+    class SubConstructThrowException {
+    public:
+      SubConstructThrowException() { no_object_test_counter += 4; }
+      ~SubConstructThrowException() { no_object_test_counter += 5; }
+
+      void operator()() { no_object_test_counter += 6; }
+    };
+
+    ConstructThrowException(const SubConstructThrowException &) {
+      throw std::exception{};
+    }
+    ConstructThrowException(const ConstructThrowException &) {
+      no_object_test_counter++;
+    }
+    ~ConstructThrowException() { no_object_test_counter += 2; }
+
+    void operator()() { no_object_test_counter += 3; }
+  };
+
+  {
+    EXPECT_EQ(no_object_test_counter, 0);
+
+    // Sub Decault Construct -> 4
+    ConstructThrowException::SubConstructThrowException sub;
     EXPECT_EQ(no_object_test_counter, 4);
+
+    try {
+      // scope_exit<ConstructThrowException> scope1{sub};
+    } catch (...) {
+    }
+    // Sub operator()() -> 6
+    EXPECT_EQ(no_object_test_counter, 10);
   }
+
+  // Sub ~() -> 5
+  EXPECT_EQ(no_object_test_counter, 15);
 }
 
-TEST_F(ScopeExitTest, move_construct_only_move_and_copy_test) {
-  {
-    hy::scope_exit exit_scope1(OnlyMoveAndCopyConstruct{});
-    EXPECT_EQ(no_object_test_counter, 1);
+// TEST_F(ScopeExitTest, ReferenceConstruct) {
+//   EXPECT_EQ(no_object_test_counter, 0);
 
-    hy::scope_exit exit_scope2(std::move(exit_scope1));
-    EXPECT_EQ(no_object_test_counter, 2);
-  }
-}
+//   auto no_object = [](){};
 
-TEST_F(ScopeExitTest, move_construct_only_nothrow_move_and_copy_test) {
-  {
-    hy::scope_exit exit_scope1(OnlyNothrowMoveAndCopyConstruct{});
-    EXPECT_EQ(no_object_test_counter, 2);
+//   scope_exit<decltype(no_object)&> scope{(no_object)};
+// }
 
-    hy::scope_exit exit_scope2(std::move(exit_scope1));
-    EXPECT_EQ(no_object_test_counter, 4);
-  }
+
+TEST_F(ScopeExitTest, ReferenceConstruct) {
+  scope_exit<decltype(no_object_test_function)&> scope1{no_object_test_function};
+
+
 }
 
 auto main(int argc, char **argv) -> int {

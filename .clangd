@@ -1,0 +1,39 @@
+# .clangd 配置文件示例
+
+# 编译参数（最重要的部分）
+CompileFlags:
+  Add: 
+    - "-I./src/scope"
+  
+
+
+; # 诊断设置
+; Diagnostics:
+;   ClangTidy:
+;     # 启用或禁用特定的检查
+;     Add: ["bugprone-*", "performance-*"]
+;     Remove: ["modernize-use-trailing-return-type"]
+  
+;   # 忽略特定文件的诊断
+;   Suppress: ["*/third_party/*"]
+  
+;   # 显示编译器错误为警告
+;   Misc: 
+;     - "-Wno-error"
+
+; # 代码补全设置
+; Completion:
+;   AllScopes: true  # 在所有作用域中补全
+;   IncludeBlockingCompletions: false  # 不阻塞UI
+
+; # 索引设置
+; Index:
+;   Background: Build  # 索引策略
+;   TrackDependencies: true  # 跟踪依赖关系
+  
+; # 头文件插入设置
+; HeaderInsertion:
+;   Enabled: true  # 自动插入头文件
+
+; # 内存使用限制
+; MemoryLimitMB: 2048  # 限制内存使用

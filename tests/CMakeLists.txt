@@ -35,6 +35,8 @@ enable_testing()
 ##################################
 # Targets
 ##################################
+# Enable verbose candidate diagnostics for C++ targets
+add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fdiagnostics-all-candidates>)
 
 
 add_executable(Tests

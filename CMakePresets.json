@@ -1,6 +1,10 @@
 {
     "version": 3,
-    "cmakeMinimumRequired": { "major": 3, "minor": 19, "patch": 0 },
+    "cmakeMinimumRequired": {
+        "major": 3,
+        "minor": 19,
+        "patch": 0
+    },
     "configurePresets": [
         {
             "name": "default-gcc",
@@ -53,6 +57,18 @@
                 "CMAKE_BUILD_TYPE": "Release",
                 "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
             }
+        },
+        {
+            "name": "g++15",
+            "displayName": "GCC 15.2.0 x86_64-linux-gnu",
+            "description": "Using compilers: C = /usr/bin/gcc, CXX = /usr/bin/g++",
+            "binaryDir": "${sourceDir}/out/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/out/install/${presetName}",
+                "CMAKE_C_COMPILER": "/usr/bin/gcc",
+                "CMAKE_CXX_COMPILER": "/usr/bin/g++",
+                "CMAKE_BUILD_TYPE": "Debug"
+            }
         }
     ],
     "buildPresets": [
@@ -62,7 +78,9 @@
             "configurePreset": "default-gcc",
             "configuration": "Debug",
             "jobs": 4,
-            "targets": [ "all" ]
+            "targets": [
+                "all"
+            ]
         },
         {
             "name": "default-clang",
@@ -70,7 +88,9 @@
             "configurePreset": "default-clang",
             "configuration": "Debug",
             "jobs": 4,
-            "targets": [ "all" ]
+            "targets": [
+                "all"
+            ]
         },
         {
             "name": "release-gcc",
@@ -78,7 +98,9 @@
             "configurePreset": "release-gcc",
             "configuration": "Release",
             "jobs": 4,
-            "targets": [ "all" ]
+            "targets": [
+                "all"
+            ]
         },
         {
             "name": "release-clang",
@@ -86,7 +108,9 @@
             "configurePreset": "release-clang",
             "configuration": "Release",
             "jobs": 4,
-            "targets": [ "all" ]
+            "targets": [
+                "all"
+            ]
         }
     ]
 }
